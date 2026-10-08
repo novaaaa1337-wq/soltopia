@@ -11,7 +11,6 @@ npm start            # http://localhost:5173
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `DEV` | on | `DEV=0` removes the free "+5 SLOCK" test button |
 | `PORT` | 5173 | |
 
 Saves go to `data/` (accounts, worlds, sign-in tokens).

@@ -9,9 +9,7 @@ const { ITEMS, SLOCK, DSLOCK, SEED, W, H, TS, MAX_STACK, BASE_SLOTS } = SG;
 const MAX_SLOTS = 400;
 
 const PORT = +process.env.PORT || 5173;
-const CONFIG = {
-  dev: process.env.DEV !== '0',          // enables the free "+5 SLOCK" button. Run with DEV=0 in production.
-};
+const CONFIG = {};
 
 // ---------------- persistence ----------------
 const DATA = path.join(__dirname, 'data');
@@ -494,7 +492,6 @@ const handlers = {
     else { if (!s.acc.inv[DSLOCK]) return msg(s, 'No Diamond Solana Locks.'); if (!fits(s.acc, { [SLOCK]: 100 }, { [DSLOCK]: 1 })) return msg(s, '🎒 Not enough backpack space!'); addItem(s.acc, DSLOCK, -1); addItem(s.acc, SLOCK, 100); }
     sendInv(s);
   },
-  dev_slock(s) { if (CONFIG.dev) { if (!room(s.acc, SLOCK)) return msg(s, '🎒 Not enough backpack space!'); addItem(s.acc, SLOCK, 5); sendInv(s); } },
   trash(s, m) {
     const id = m.id | 0, n = Math.floor(+m.n);
     if (!ITEMS[id] || !(n > 0) || (s.acc.inv[id] || 0) < n) return;
@@ -573,4 +570,4 @@ wss.on('connection', (ws) => {
   });
   ws.on('close', () => { leaveWorld(s); sessions.delete(s); });
 });
-server.listen(PORT, () => console.log(`Soltopia running on http://localhost:${PORT}  (dev=${CONFIG.dev})`));
+server.listen(PORT, () => console.log(`Soltopia running on http://localhost:${PORT}`));

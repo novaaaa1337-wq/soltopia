@@ -9,3 +9,7 @@ data/
 *.tmp
 .DS_Store
 Thumbs.db
+
+# videos
+*.mp4
+*.webm

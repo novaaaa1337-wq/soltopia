@@ -45,7 +45,6 @@ const NET = {
     myName = m.name; config = m.config; me.seed = Math.random() * 5000; linkedWallet = m.wallet;
     store('sg_token', m.token); walletBusy(false); $('#lerr').textContent = '';
     $('#menuWho').textContent = `${myName} · ${short(m.wallet)}`;
-    $('#devLine').classList.toggle('hidden', !config.dev);
     renderWorldList(m.worlds); showScreen('menu');
   },
   worlds(m) { renderWorldList(m.worlds); showScreen('menu'); },
@@ -1005,7 +1004,6 @@ function renderStore() {
 }
 $('#storeBtn').onclick = () => toggleModal('store', renderStore);
 document.querySelectorAll('[data-convert]').forEach((b) => (b.onclick = () => send({ t: 'convert', dir: b.dataset.convert })));
-$('#devBtn').onclick = () => send({ t: 'dev_slock' });
 
 // ---- player popup ----
 let popPlayer = null;
