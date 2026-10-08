@@ -82,7 +82,7 @@ const msg = (s, text) => send(s, { t: 'msg', text });
 const pub = (s) => ({ name: s.name, x: s.x, y: s.y, vx: 0, f: s.f, g: true, worn: s.acc.worn, level: s.acc.level });
 function sendInv(s) {
   const a = s.acc;
-  send(s, { t: 'inv', inv: a.inv, gems: a.gems, worn: a.worn, wallet: a.wallet || null, level: a.level, xp: a.xp, need: xpNeed(a.level), slots: a.slots, upCost: upgradeCost(a) });
+  send(s, { t: 'inv', inv: a.inv, gems: a.gems, worn: a.worn, wallet: a.wallet || null, level: a.level, xp: a.xp, need: xpNeed(a.level), slots: a.slots, upCost: upgradeCost(a), layout: a.layout || [] });
 }
 
 // ---------------- levels ----------------
@@ -172,7 +172,7 @@ function tryPickups(s) {
 }
 
 // ---------------- world actions ----------------
-function punch(s, tx, ty) {
+function punch(s, tx, ty, toolId = 0) {
   const w = s.world, now = Date.now();
   if (!w || tx < 0 || ty < 0 || tx >= W || ty >= H || !inRange(s, tx, ty)) return;
   if (now - s.lastHit < 150) return;
@@ -182,7 +182,8 @@ function punch(s, tx, ty) {
   if (!tree && !f && !b) return;
   if (!canEdit(s, w)) return msg(s, `🔒 This world is locked by ${w.owner}.`);
 
-  const power = ITEMS[s.acc.worn.hand]?.power || 1;
+  const tool = ITEMS[toolId]?.type === 'wear' && s.acc.inv[toolId] ? ITEMS[toolId].power || 0 : 0;   // a held sword/pickaxe counts too
+  const power = Math.max(1, ITEMS[s.acc.worn.hand]?.power || 0, tool);
   const d = w.dmg[i] && now - w.dmg[i].t < 5000 ? w.dmg[i] : (w.dmg[i] = { h: 0 });
   d.t = now;
   const cx = tx * TS + 16, cy = ty * TS + 16;
@@ -435,8 +436,13 @@ const handlers = {
     bcast(w, { t: 'ppos', name: s.name, x: s.x, y: s.y, vx: +m.vx || 0, f: s.f, g: !!m.g }, s);
     tryPickups(s);
   },
-  punch(s, m) { punch(s, m.x | 0, m.y | 0); },
+  punch(s, m) { punch(s, m.x | 0, m.y | 0, m.tool | 0); },
   place(s, m) { place(s, m.x | 0, m.y | 0, m.id | 0); },
+  layout(s, m) {   // the player's own arrangement of backpack slots (ids or null for gaps)
+    if (!Array.isArray(m.layout)) return;
+    s.acc.layout = m.layout.slice(0, MAX_SLOTS).map((v) => (Number.isInteger(v) && ITEMS[v] ? v : null));
+    accountsDirty = true;
+  },
   wear(s, m) {
     const id = m.id | 0, it = ITEMS[id];
     if (!it || it.type !== 'wear' || !s.acc.inv[id]) return;

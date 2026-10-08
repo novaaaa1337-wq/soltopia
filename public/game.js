@@ -21,14 +21,19 @@ let wsReady = null;
 function ensureWS() {
   if (ws && ws.readyState === 1) return Promise.resolve();
   if (wsReady) return wsReady;
-  return (wsReady = new Promise((resolve) => {
-    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-    ws.onopen = () => { wsReady = null; resolve(); };
-    ws.onmessage = (e) => { const m = JSON.parse(e.data); (NET[m.t] || (() => {}))(m); };
-    ws.onclose = () => {
-      wsReady = null; const wasIn = !!myName; myName = null; showScreen('login');
-      $('#lerr').textContent = 'Disconnected from server. Reconnecting…';
-      setTimeout(() => boot(wasIn), 2000);
+  // Never leave callers waiting forever: an attempt either opens or fails within 8s, then we retry.
+  return (wsReady = new Promise((resolve, reject) => {
+    const sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+    ws = sock;
+    const giveUp = setTimeout(() => sock.close(), 8000);
+    sock.onopen = () => { clearTimeout(giveUp); wsReady = null; resolve(); };
+    sock.onmessage = (e) => { const m = JSON.parse(e.data); (NET[m.t] || (() => {}))(m); };
+    sock.onclose = () => {
+      clearTimeout(giveUp); wsReady = null; reject(new Error('offline'));
+      if (ws !== sock) return;
+      const wasIn = !!myName; myName = null; showScreen('login'); walletBusy(false);
+      $('#lerr').textContent = "Can't reach the game server — reconnecting…";
+      setTimeout(() => boot(wasIn), 2500);
     };
   }));
 }
@@ -43,12 +48,12 @@ const NET = {
   logged_out() { store('sg_token', null); wallet?.disconnect(); wallet = null; walletAddr = null; showScreen('login'); },
   hello(m) {
     myName = m.name; config = m.config; me.seed = Math.random() * 5000; linkedWallet = m.wallet;
-    store('sg_token', m.token); walletBusy(false); $('#lerr').textContent = '';
+    store('sg_token', m.token); clearTimeout(signInTimer); walletBusy(false); $('#lerr').textContent = '';
     $('#menuWho').textContent = `${myName} · ${short(m.wallet)}`;
     renderWorldList(m.worlds); showScreen('menu');
   },
   worlds(m) { renderWorldList(m.worlds); showScreen('menu'); },
-  inv(m) { inv = m.inv; gems = m.gems; worn = m.worn; linkedWallet = m.wallet; level = m.level; xp = m.xp; xpNeed = m.need; slots = m.slots; upCost = m.upCost; refreshHUD(); if (tradeSt) renderTrade(); },
+  inv(m) { inv = m.inv; gems = m.gems; worn = m.worn; linkedWallet = m.wallet; level = m.level; xp = m.xp; xpNeed = m.need; slots = m.slots; upCost = m.upCost; layout = m.layout || []; refreshHUD(); if (tradeSt) renderTrade(); },
   msg(m) { toast(m.text); },
   world(m) {
     world = m; tOff = m.now - Date.now(); others = {};
@@ -809,7 +814,7 @@ function act(tx, ty) {
     else if (['block', 'platform', 'lock', 'spikes'].includes(it.type)) place = !f && !tree;
   }
   if (place) { send({ t: 'place', x: tx, y: ty, id: selected }); burst(tx * TS + 16, ty * TS + 16, it.col || '#fff', 3); }
-  else if (selected === 0) { send({ t: 'punch', x: tx, y: ty }); particles.push({ x: tx * TS + 16, y: ty * TS + 16, vx: 0, vy: 0, life: 0, max: .15, col: '#fff', s: 7, k: 'star' }); }
+  else if (selected === 0 || it?.type === 'wear') { send({ t: 'punch', x: tx, y: ty, tool: selected }); particles.push({ x: tx * TS + 16, y: ty * TS + 16, vx: 0, vy: 0, life: 0, max: .15, col: '#fff', s: 7, k: 'star' }); }
 }
 function worldMouse() { return { x: mouse.x + cam.x, y: mouse.y + cam.y }; }
 function actAtMouse() { lastAct = performance.now(); const w = worldMouse(); act(Math.floor(w.x / TS), Math.floor(w.y / TS)); }
@@ -839,7 +844,7 @@ cv.addEventListener('pointerdown', (e) => {
 });
 addEventListener('pointerup', () => (mouse.down = false));
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
-cv.addEventListener('wheel', (e) => { const ids = invIds(); const k = ids.indexOf(selected) + Math.sign(e.deltaY); selected = ids[(k + ids.length) % ids.length]; refreshHUD(); }, { passive: true });
+cv.addEventListener('wheel', (e) => { const ids = invIds(); const k = ids.indexOf(selected) + Math.sign(e.deltaY); selectItem(ids[(k + ids.length) % ids.length]); }, { passive: true });
 
 addEventListener('keydown', (e) => {
   const chatin = $('#chatin');
@@ -855,7 +860,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyB' || e.code === 'KeyI') toggleInv();
   if (e.code === 'KeyR') die();
   if (e.code === 'Escape') document.querySelectorAll('.modal').forEach((m) => m.id !== 'trade' && m.classList.add('hidden'));
-  if (/^Digit[1-9]$/.test(e.code)) { const id = invIds()[+e.code.slice(5) - 1]; if (id !== undefined) { selected = id; refreshHUD(); } }
+  if (/^Digit[1-9]$/.test(e.code)) { const id = invCells()[+e.code.slice(5) - 1]; if (id != null) selectItem(id); }
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
@@ -912,7 +917,29 @@ document.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => b.cl
 document.querySelectorAll('.modal').forEach((m) => m.addEventListener('pointerdown', (e) => { if (e.target === m && m.id !== 'trade') m.classList.add('hidden'); }));
 
 const ORDER = { fist: 0, wrench: 0, block: 1, platform: 1, spikes: 1, bg: 2, seed: 3, lock: 4, wear: 5 };
-function invIds() { return [0, WRENCH, ...Object.keys(inv).map(Number).filter((id) => inv[id] > 0 && ITEMS[id]).sort((a, b) => ORDER[ITEMS[a].type] - ORDER[ITEMS[b].type] || a - b)]; }
+// Backpack layout: the player's saved slot order (with gaps); new items fill the first free slot.
+function buildLayout() {
+  const owned = Object.keys(inv).map(Number).filter((id) => inv[id] > 0 && ITEMS[id]);
+  const lay = new Array(Math.max(slots, owned.length)).fill(null), placed = new Set();
+  (layout || []).forEach((id, k) => { if (k < lay.length && id != null && inv[id] > 0 && !placed.has(id)) { lay[k] = id; placed.add(id); } });
+  for (const id of owned.filter((id) => !placed.has(id)).sort((a, b) => ORDER[ITEMS[a].type] - ORDER[ITEMS[b].type] || a - b)) {
+    const k = lay.indexOf(null); if (k < 0) lay.push(id); else lay[k] = id;
+  }
+  return lay;
+}
+function invCells() { return [0, WRENCH, ...buildLayout()]; }
+function invIds() { return invCells().filter((id) => id != null); }
+function moveSlot(from, to) {
+  const lay = buildLayout();
+  if (from === to || from < 0 || to < 0 || from >= lay.length || to >= lay.length) return;
+  [lay[from], lay[to]] = [lay[to], lay[from]];
+  layout = lay; send({ t: 'layout', layout: lay }); renderInv();
+}
+function selectItem(id) {
+  selected = id;
+  if (ITEMS[id]?.slot === 'hand' && worn.hand !== id) send({ t: 'wear', id });   // holding a tool equips it
+  refreshHUD();
+}
 function slotEl(id, count, opts = {}) {
   const d = document.createElement('div'); d.className = 'slot' + (opts.sel ? ' sel' : '') + (opts.worn ? ' worn' : ''); d.title = ITEMS[id].name;
   const c = document.createElement('canvas'); c.width = c.height = 72; const x = c.getContext('2d'); x.scale(2, 2); drawIcon(x, id, 0, 0, 36);
@@ -930,7 +957,7 @@ function refreshHUD() {
 }
 
 // ---- Growtopia-style backpack: a quick bar that drops open into the full slot grid ----
-let invOpen = false;
+let invOpen = false, layout = [], dragFrom = null;
 function toggleInv() { invOpen = !invOpen; renderInv(); }
 function itemDesc(it) {
   return it.desc || ({ seed: `Plant it on a block to grow ${ITEMS[it.of]?.name}. Plant on an unripe tree to splice.`, bg: 'Background block. Goes behind everything.',
@@ -938,14 +965,27 @@ function itemDesc(it) {
 }
 function renderInv() {
   const g = $('#invGrid'); g.innerHTML = '';
-  const ids = invIds(), items = ids.length - 2;
-  const cells = invOpen ? 2 + Math.max(slots, items) : 10;
+  const all = invCells(), items = all.length - 2 - all.slice(2).filter((id) => id == null).length;
+  const cells = invOpen ? all.length : 10;
   for (let k = 0; k < cells; k++) {
-    const id = ids[k];
-    if (id === undefined) { const e = document.createElement('div'); e.className = 'slot empty'; g.appendChild(e); continue; }
-    const s = slotEl(id, id && id !== WRENCH ? inv[id] : null, { sel: id === selected, worn: Object.values(worn).includes(id), key: k < 9 ? k + 1 : '' });
-    s.onclick = () => { selected = id; refreshHUD(); };
-    s.ondblclick = () => { if (ITEMS[id].type === 'wear') send({ t: 'wear', id }); };
+    const id = all[k], slotIdx = k - 2;
+    let s;
+    if (id == null) { s = document.createElement('div'); s.className = 'slot empty'; }
+    else {
+      s = slotEl(id, id && id !== WRENCH ? inv[id] : null, { sel: id === selected, worn: Object.values(worn).includes(id), key: k < 9 ? k + 1 : '' });
+      s.onclick = () => selectItem(id);
+      s.ondblclick = () => { if (ITEMS[id].type === 'wear') send({ t: 'wear', id }); };
+    }
+    if (slotIdx >= 0) {   // drag items between backpack slots
+      if (id != null) {
+        s.draggable = true;
+        s.addEventListener('dragstart', (e) => { dragFrom = slotIdx; s.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(slotIdx)); });
+        s.addEventListener('dragend', () => { dragFrom = null; s.classList.remove('dragging'); });
+      }
+      s.addEventListener('dragover', (e) => { if (dragFrom != null) { e.preventDefault(); s.classList.add('dropto'); } });
+      s.addEventListener('dragleave', () => s.classList.remove('dropto'));
+      s.addEventListener('drop', (e) => { e.preventDefault(); s.classList.remove('dropto'); if (dragFrom != null) moveSlot(dragFrom, slotIdx); dragFrom = null; });
+    }
     g.appendChild(s);
   }
   $('#inv').classList.toggle('open', invOpen);
@@ -1052,7 +1092,7 @@ function renderTrade() {
   fill($('#trTheirs'), T.theirs);
   $('#trMineBox').classList.toggle('ok', T.myAcc); $('#trTheirsBox').classList.toggle('ok', T.theirAcc);
   const g = $('#trInv'); g.innerHTML = '';
-  for (const id of invIds().slice(1)) { const s = slotEl(id, inv[id], { sel: id === trPick }); s.onclick = () => { trPick = id; renderTrade(); }; g.appendChild(s); }
+  for (const id of invIds().slice(2)) { const s = slotEl(id, inv[id], { sel: id === trPick }); s.onclick = () => { trPick = id; renderTrade(); }; g.appendChild(s); }
   const row = $('#trAddRow');
   if (trPick && inv[trPick]) {
     row.innerHTML = `<b>${esc(ITEMS[trPick].name)}</b><input class="field" type="number" id="trN" min="1" max="${inv[trPick]}" value="${T.mine[trPick] || 1}" style="width:90px"><button class="btn" id="trAdd">Put in trade</button>`;
@@ -1197,13 +1237,16 @@ function walletBusy(on, el) {
 }
 
 // ---- sign-in: connect → sign message → (new wallet) choose username ----
+let signInTimer = null;
 async function signIn(adapter, el) {
   $('#lerr').textContent = ''; walletBusy(true, el);
-  try {
-    walletAddr = await adapter.connect(); wallet = adapter; store('sg_wallet', adapter.name);
-    await ensureWS();
-    send({ t: 'auth_nonce', addr: walletAddr });
-  } catch (e) { console.warn(e); $('#lerr').textContent = 'Wallet connection was cancelled.'; walletBusy(false); }
+  clearTimeout(signInTimer);   // if the wallet never answers, unlock the buttons so the player can retry
+  signInTimer = setTimeout(() => { if (!myName) { walletBusy(false); $('#lerr').textContent = 'No response from your wallet. Please try again.'; } }, 60000);
+  try { walletAddr = await adapter.connect(); wallet = adapter; store('sg_wallet', adapter.name); }
+  catch (e) { console.warn(e); clearTimeout(signInTimer); $('#lerr').textContent = 'Wallet connection was cancelled.'; return walletBusy(false); }
+  try { await ensureWS(); }
+  catch { clearTimeout(signInTimer); $('#lerr').textContent = "Can't reach the game server right now. Try again in a moment."; return walletBusy(false); }
+  send({ t: 'auth_nonce', addr: walletAddr });
 }
 async function signAuth(message) {
   try { const sig = await wallet.signMessage(new TextEncoder().encode(message)); send({ t: 'auth', sig: Array.from(sig) }); }
@@ -1247,7 +1290,8 @@ $('#menuWalletBtn').onclick = openWalletModal;
 $('#nback').onclick = () => { wallet?.disconnect(); wallet = null; showScreen('login'); };
 
 async function boot(resume = true) {
-  await ensureWS();
+  try { await ensureWS(); } catch { return; }   // onclose already schedules the next attempt
+  $('#lerr').textContent = '';
   const token = load('sg_token');
   if (resume && token) send({ t: 'resume', token }); else showScreen('login');
 }
