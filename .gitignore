@@ -1,0 +1,11 @@
+# dependencies
+node_modules/
+
+# game saves: accounts, wallet addresses, sign-in tokens, worlds — never commit
+data/
+
+# local tooling
+.claude/
+*.tmp
+.DS_Store
+Thumbs.db

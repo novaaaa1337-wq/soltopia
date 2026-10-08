@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Soltopia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tweetnacl/1.0.3/nacl-fast.min.js"></script>
+<style>
+  :root{
+    --ink:#1b1f3b; --panel:#fdf7e8; --panel2:#f1e6c8; --edge:#3b2a14; --muted:#7a6a4f;
+    --blue:#3fa0ff; --blue2:#1f6fd6; --green:#5ccc4c; --green2:#2f9a2a; --red:#ff5a5a; --red2:#c43030;
+    --sol:#9945ff; --sol2:#14f195; --gem:#ff4d6d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#4aa3ff;color:var(--ink);font:15px/1.3 'Fredoka',system-ui,sans-serif;user-select:none;-webkit-user-select:none}
+  canvas#c{display:block;position:fixed;inset:0}
+  .hidden{display:none!important}
+
+  /* chunky cartoon panels & buttons */
+  .panel{background:var(--panel);border:3px solid var(--edge);border-radius:16px;box-shadow:0 5px 0 var(--edge),0 10px 30px #0005}
+  .btn{font:600 15px 'Fredoka',sans-serif;color:#fff;border:3px solid var(--edge);border-radius:12px;padding:7px 14px;cursor:pointer;
+       background:linear-gradient(var(--blue),var(--blue2));box-shadow:0 3px 0 var(--edge);text-shadow:0 2px 0 #0004;transition:transform .05s}
+  a.btn{text-decoration:none;display:inline-block}
+  .btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--edge)}
+  .btn.green{background:linear-gradient(var(--green),var(--green2))}
+  .btn.red{background:linear-gradient(var(--red),var(--red2))}
+  .btn.sol{background:linear-gradient(135deg,var(--sol),#6a2bd6 60%,#0fae6e)}
+  .btn.gray{background:linear-gradient(#b9b2a2,#8f8775)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  input.field{font:500 16px 'Fredoka',sans-serif;padding:9px 12px;border:3px solid var(--edge);border-radius:12px;background:#fff;color:var(--ink);outline:none;width:100%}
+  input.field:focus{border-color:var(--blue2)}
+  h1,h2,h3{margin:0}
+
+  /* screens */
+  .screen{position:fixed;inset:0;display:grid;place-items:center;padding:16px}
+  .card{width:min(420px,100%);padding:22px}
+  .logo{font-weight:700;font-size:52px;text-align:center;color:#fff;letter-spacing:1px;
+        text-shadow:0 4px 0 var(--edge),3px 0 0 var(--edge),-3px 0 0 var(--edge),0 -3px 0 var(--edge),0 8px 18px #0006;margin-bottom:10px}
+  .logo span{color:var(--sol2)}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  .row{display:flex;gap:8px;align-items:center}
+  .muted{color:var(--muted);font-size:13px}
+  .err{color:var(--red2);font-size:14px;min-height:18px}
+  .worldlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;max-height:240px;overflow:auto;padding:2px}
+  .wallet{display:flex;align-items:center;gap:12px;background:#fff;border:3px solid var(--edge);border-radius:12px;padding:9px 12px;cursor:pointer;font-weight:600;font-size:16px;box-shadow:0 3px 0 var(--edge)}
+  .wallet:hover{background:#fff8dd}
+  .wallet img{width:30px;height:30px;border-radius:8px}
+  .wallet small{margin-left:auto;color:var(--muted);font-weight:500}
+  .wallet.busy{opacity:.6;pointer-events:none}
+  .wchip{background:var(--panel2);border:3px solid var(--edge);border-radius:12px;padding:8px 10px;cursor:pointer;font-weight:600}
+  .wchip:hover{background:#fff}
+  .wchip small{display:block;font-weight:400;color:var(--muted)}
+
+  /* HUD */
+  #hud{position:fixed;top:10px;left:10px;right:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;pointer-events:none}
+  #hud > *{pointer-events:auto}
+  .pill{background:var(--panel);border:3px solid var(--edge);border-radius:999px;padding:4px 12px;font-weight:700;display:flex;gap:6px;align-items:center;box-shadow:0 3px 0 var(--edge)}
+  .spacer{flex:1}
+  #worldName{font-size:17px}
+  #worldName small{font-weight:500;color:var(--muted)}
+
+  /* inventory (Growtopia-style: quick bar that expands into the full backpack) */
+  #inv{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);width:min(600px,calc(100% - 16px));padding:6px;z-index:3}
+  .invbar{display:flex;gap:6px;align-items:stretch}
+  #invGrid{flex:1;display:grid;grid-template-columns:repeat(10,1fr);gap:4px;overflow-y:auto}
+  #inv.open #invGrid{max-height:44vh}
+  #invGrid .slot{width:auto;height:auto;flex:none;aspect-ratio:1}
+  #invGrid .slot canvas{width:74%;height:74%}
+  .slot.empty{background:#d9cba8;border-color:#c9b88f;cursor:default;opacity:.7}
+  .invtoggle{width:34px;border:3px solid var(--edge);border-radius:10px;background:linear-gradient(var(--blue),var(--blue2));color:#fff;font-weight:700;cursor:pointer;box-shadow:0 3px 0 var(--edge)}
+  .invfoot{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-weight:600}
+  .invfoot .btn{padding:4px 10px;font-size:13px}
+  #invInfo{display:flex;gap:8px;align-items:center;background:var(--panel2);border:2px solid #d8c79f;border-radius:12px;padding:6px 8px;margin-bottom:6px}
+  #invInfo .ic{width:36px;height:36px}
+  #invInfo .grow{flex:1;min-width:0}
+  #invInfo small{display:block;color:var(--muted)}
+  #invInfo .btn{padding:5px 10px}
+  .slot{position:relative;width:48px;height:48px;flex:0 0 48px;border:3px solid #c9b88f;border-radius:10px;background:#e9dcbc;display:grid;place-items:center;cursor:pointer}
+  .slot.sel{border-color:#ffb300;background:#fff3c4;box-shadow:0 0 0 2px #ffb300}
+  .slot.worn::after{content:'';position:absolute;inset:-3px;border:3px solid var(--sol2);border-radius:10px}
+  .slot canvas{width:36px;height:36px}
+  .slot b{position:absolute;right:3px;bottom:0;font-size:12px;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000}
+  .slot i{position:absolute;left:4px;top:0;font-size:10px;color:var(--muted);font-style:normal;font-weight:600}
+
+  /* chat (Growtopia-style log + input) */
+  #chat{position:fixed;left:10px;bottom:96px;width:min(400px,calc(100% - 20px));background:rgba(12,14,30,.62);border:2px solid rgba(0,0,0,.7);border-radius:10px;padding:6px;z-index:2}
+  .chathead{display:flex;justify-content:space-between;align-items:center;color:#cfd6ff;font-weight:600;font-size:12px;margin-bottom:3px}
+  .chathead button{background:none;border:0;color:#fff;font:700 16px Fredoka,sans-serif;cursor:pointer;padding:0 4px}
+  #chatlog{height:140px;overflow-y:auto;display:flex;flex-direction:column;gap:1px;font-size:14px;font-weight:500;color:#fff;text-shadow:0 1px 2px #000;padding-right:4px;user-select:text;-webkit-user-select:text}
+  #chatlog div{word-wrap:break-word}
+  #chat.min #chatlog{display:none}
+  #chatlog .sys{color:#ffe27a} #chatlog .enter{color:#8dff7a} #chatlog .me{color:#ffb4e6;font-style:italic}
+  #chatlog .pm{color:#ff9cf5} #chatlog .cw{color:#9ad1ff}
+  .chatrow{display:flex;gap:6px;margin-top:6px}
+  #chatin{padding:5px 9px;font-size:14px;border-width:2px}
+  .chatrow .btn{padding:3px 10px;font-size:13px}
+  .orline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+  .orline::before,.orline::after{content:'';flex:1;height:2px;background:#d8c79f}
+  @keyframes fade{0%,85%{opacity:1}100%{opacity:0}}
+
+  /* modals */
+  .modal{position:fixed;inset:0;background:#0006;display:grid;place-items:center;padding:14px;z-index:5}
+  .mbox{width:min(620px,100%);max-height:90vh;overflow:auto;padding:18px}
+  .mhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .mhead h2{font-size:24px}
+  .sec{font-weight:700;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+  .line{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel2);border:2px solid #d8c79f;border-radius:12px;padding:8px 10px;margin-bottom:6px}
+  .line .ic{width:36px;height:36px;flex:0 0 36px}
+  .line .grow{flex:1;min-width:0}
+  .line small{display:block;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,52px);gap:6px}
+  #invDetail{margin-top:12px}
+
+  /* trade */
+  .tcols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .tbox{background:var(--panel2);border:3px solid #d8c79f;border-radius:12px;padding:8px;min-height:120px}
+  .tbox.ok{border-color:var(--green2);background:#e3f8d8}
+  .tbox h3{font-size:15px;margin-bottom:6px}
+
+  .xpbar{height:10px;background:#d8c79f;border:2px solid var(--edge);border-radius:99px;overflow:hidden;margin:6px 0}
+  .xpbar div{height:100%;width:0;background:linear-gradient(90deg,#ffd23f,#ff9f1a);transition:width .3s}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+  .stats div{background:var(--panel2);border:2px solid #d8c79f;border-radius:10px;padding:6px;text-align:center}
+  .stats small{display:block;color:var(--muted);font-size:11px}
+  #toasts{position:fixed;top:64px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;z-index:9;pointer-events:none}
+  .toast{background:var(--panel);border:3px solid var(--edge);border-radius:12px;padding:6px 14px;font-weight:600;box-shadow:0 3px 0 var(--edge);animation:fade 4s forwards}
+  #invite{position:fixed;top:64px;right:10px;padding:12px;z-index:6}
+
+  #touch{position:fixed;bottom:80px;left:10px;right:10px;display:none;justify-content:space-between;pointer-events:none}
+  #touch div{display:flex;gap:10px}
+  #touch button{width:60px;height:60px;border-radius:50%;font-size:24px;pointer-events:auto;opacity:.85}
+  @media (pointer:coarse){#touch{display:flex}}
+  @media (max-width:600px){.logo{font-size:40px}.tcols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<!-- LOGIN: wallet required -->
+<div class="screen" id="loginScreen">
+  <div style="width:min(440px,100%)">
+    <div class="logo">Sol<span>topia</span></div>
+    <div class="panel card stack" style="width:100%">
+      <h2>Connect your wallet</h2>
+      <div class="muted">Soltopia uses a Solana wallet as your account. You'll sign a free message to prove it's yours. No transaction, no fee.</div>
+      <div id="walletList" class="stack" style="gap:8px"></div>
+      <div class="orline"><span>or</span></div>
+      <button class="btn green" id="createWallet">✨ Create me a wallet</button>
+      <div class="muted" id="createNote">No extension needed. We'll make a new Solana wallet on this device. You can export its private key anytime from the 🔑 Wallet button.</div>
+      <div class="err" id="lerr"></div>
+    </div>
+  </div>
+</div>
+
+<!-- USERNAME (first sign-in only) -->
+<div class="screen hidden" id="nameScreen">
+  <div style="width:min(440px,100%)">
+    <div class="logo">Sol<span>topia</span></div>
+    <div class="panel card stack" style="width:100%">
+      <h2>Choose your GrowID</h2>
+      <div class="muted">Wallet <b id="nameWallet"></b> is new here. Pick the name other players will see. You can't change it later.</div>
+      <input class="field" id="nname" placeholder="Username" maxlength="16" autocomplete="off">
+      <div class="muted">3–16 characters: letters, numbers or _</div>
+      <div class="err" id="nerr"></div>
+      <div class="row"><button class="btn gray" id="nback">Back</button><button class="btn green" id="nbtn" style="flex:1">Create account</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- WORLD MENU -->
+<div class="screen hidden" id="menuScreen">
+  <div style="width:min(520px,100%)">
+    <div class="logo">Sol<span>topia</span></div>
+    <div class="panel card stack" style="width:100%">
+      <div class="row" style="justify-content:space-between"><h2>Enter a world</h2><span class="muted" id="menuWho"></span></div>
+      <div class="row">
+        <input class="field" id="wname" placeholder="WORLD NAME" maxlength="16" style="text-transform:uppercase">
+        <button class="btn green" id="wjoin">Go</button>
+      </div>
+      <div class="row"><button class="btn gray" id="wrandom">🎲 Random</button><button class="btn gray" id="wrefresh">⟳ Refresh</button><span class="spacer" style="flex:1"></span><button class="btn gray" id="menuWalletBtn">🔑 Wallet</button><button class="btn red" id="logoutBtn">Sign out</button></div>
+      <div class="sec" style="margin:4px 0 0">Worlds</div>
+      <div class="worldlist" id="worldlist"></div>
+    </div>
+  </div>
+</div>
+
+<!-- GAME HUD -->
+<div id="hud" class="hidden">
+  <div class="pill" id="worldName"></div>
+  <div class="pill" id="lvl" style="cursor:pointer">⭐ <span id="lvlNum">1</span><div class="xpbar" style="width:60px;margin:0"><div id="lvlBar"></div></div></div>
+  <div class="pill" title="Gems">💎 <span id="gems">0</span></div>
+  <div class="pill" title="Solana Locks (1 SLOCK = 0.01 SOL)">🔒 <span id="slock">0</span></div>
+  <div class="spacer"></div>
+  <button class="btn" id="bagBtn">🎒 Backpack</button>
+  <button class="btn sol" id="storeBtn">🛒 Store</button>
+  <button class="btn gray" id="keyBtn" title="Wallet & export">🔑</button>
+  <button class="btn red" id="exitBtn">🚪 Exit</button>
+</div>
+<div id="inv" class="panel hidden">
+  <div id="invInfo" class="hidden"></div>
+  <div class="invbar">
+    <div id="invGrid"></div>
+    <button class="invtoggle" id="invToggle" title="Backpack (B)">▲</button>
+  </div>
+  <div class="invfoot hidden" id="invFoot"><span id="slotCount"></span><button class="btn green" id="upgradeBtn"></button></div>
+</div>
+<div id="chat" class="hidden">
+  <div class="chathead"><span>💬 World chat</span><button id="chatMin" title="Minimize">–</button></div>
+  <div id="chatlog"></div>
+  <div class="chatrow"><input class="field" id="chatin" maxlength="120" placeholder="Press Enter to chat · /help" autocomplete="off"><button class="btn" id="chatSend">Send</button></div>
+</div>
+<div id="touch" class="hidden">
+  <div><button class="btn" data-k="left">◀</button><button class="btn" data-k="right">▶</button></div>
+  <div><button class="btn" id="chatTouch">💬</button><button class="btn green" data-k="jump">▲</button></div>
+</div>
+<div id="toasts"></div>
+
+<!-- AMOUNT PROMPT (drop / trash) -->
+<div class="modal hidden" id="countModal">
+  <div class="panel mbox" style="width:min(340px,100%)">
+    <div class="mhead"><h2 id="cmTitle"></h2><button class="btn red" data-close>✕</button></div>
+    <div class="muted" id="cmText"></div>
+    <div class="row" style="margin-top:12px"><input class="field" type="number" id="cmN" min="1"><button class="btn green" id="cmOk">OK</button></div>
+  </div>
+</div>
+
+<!-- STORE -->
+<div class="modal hidden" id="store">
+  <div class="panel mbox">
+    <div class="mhead"><h2>🛒 Store</h2><button class="btn red" data-close>✕</button></div>
+    <div class="muted" id="storeGems"></div>
+    <div class="line" id="devLine"><div class="grow">Dev: free SLOCK<small>Server runs with DEV mode on. Disable before launch.</small></div><button class="btn gray" id="devBtn">+5 SLOCK</button></div>
+    <div class="sec">Lock exchange</div>
+    <div class="line"><div class="grow">100 Solana Locks → 1 Diamond Solana Lock</div><button class="btn gray" data-convert="up">Convert</button></div>
+    <div class="line"><div class="grow">1 Diamond Solana Lock → 100 Solana Locks</div><button class="btn gray" data-convert="down">Break</button></div>
+    <div id="storeItems"></div>
+  </div>
+</div>
+
+<!-- WALLET / EXPORT -->
+<div class="modal hidden" id="walletModal">
+  <div class="panel mbox" style="width:min(460px,100%)">
+    <div class="mhead"><h2>🔑 Your wallet</h2><button class="btn red" data-close>✕</button></div>
+    <div class="sec" style="margin-top:0">Address</div>
+    <div class="line"><code id="wmAddr" style="word-break:break-all;font-size:13px"></code><button class="btn gray" id="wmCopyAddr">Copy</button></div>
+    <div id="wmLocal">
+      <div class="sec">Private key (export)</div>
+      <div class="line" style="background:#fff0f0;border-color:#e8a0a0"><code id="wmKey" style="word-break:break-all;font-size:13px;flex:1"></code></div>
+      <div class="row" style="flex-wrap:wrap"><button class="btn" id="wmReveal">Reveal</button><button class="btn" id="wmCopy">Copy key</button><button class="btn gray" id="wmDownload">Download .json</button></div>
+      <p class="muted">⚠️ Anyone with this key controls your wallet and your Soltopia account. Never share it. It is only stored in this browser, so back it up. If you clear your browser data without a backup, the account is gone.</p>
+      <p class="muted">To use it elsewhere, import the key into Phantom, Solflare or Backpack ("Import private key"), then sign in to Soltopia with that wallet.</p>
+    </div>
+    <div id="wmExternal" class="muted">This account uses a wallet extension. Its keys are managed in your wallet app, not by Soltopia.</div>
+  </div>
+</div>
+
+<!-- PLAYER POPUP -->
+<div class="modal hidden" id="ppop">
+  <div class="panel mbox" style="width:min(340px,100%)">
+    <div class="mhead"><h2 id="ppName"></h2><button class="btn red" data-close>✕</button></div>
+    <canvas id="ppAvatar" width="160" height="160" style="display:block;margin:0 auto 8px"></canvas>
+    <div class="muted" id="ppWorn" style="text-align:center;margin-bottom:10px"></div>
+    <div id="ppInfo" style="margin-bottom:12px"></div>
+    <button class="btn green" id="ppTrade" style="width:100%">🤝 Trade</button>
+  </div>
+</div>
+
+<!-- TRADE -->
+<div class="modal hidden" id="trade">
+  <div class="panel mbox">
+    <div class="mhead"><h2 id="trTitle">Trade</h2><button class="btn red" id="trCancel">Cancel</button></div>
+    <div class="tcols">
+      <div class="tbox" id="trMineBox"><h3>Your offer <span class="muted">(click to remove)</span></h3><div class="grid" id="trMine"></div></div>
+      <div class="tbox" id="trTheirsBox"><h3 id="trTheirsTitle">Their offer</h3><div class="grid" id="trTheirs"></div></div>
+    </div>
+    <div class="sec">Your items <span style="text-transform:none;font-weight:400">— click to add</span></div>
+    <div class="grid" id="trInv"></div>
+    <div class="row" id="trAddRow" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px;justify-content:space-between">
+      <span class="muted" id="trStatus"></span>
+      <button class="btn green" id="trAccept">Accept</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel hidden" id="invite">
+  <div style="font-weight:600;margin-bottom:8px"><span id="invFrom"></span> wants to trade!</div>
+  <div class="row"><button class="btn green" id="invYes">Accept</button><button class="btn red" id="invNo">Decline</button></div>
+</div>
+
+<script src="items.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
